@@ -11,10 +11,10 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 #Variables that contains the user credentials to access Twitter API 
-access_token = "951117734338879488-xC6yB9oPshrP5JCiAlc9cMUKMjYKDlJ"
-access_token_secret = "pDaYwYIdYZBLB5cjMjwKKdrvQAolahzdy94idAuh28NUP"
-consumer_key = "QqqaHqVryTahq3r3ygQstGOwJ"
-consumer_secret = "wK0sacXoU7VAuF30P6lYGab86nqRrt8TBG96ESlX86FIywvOvX"
+access_token = ""
+access_token_secret = ""
+consumer_key = ""
+consumer_secret = ""
 
 def url_finder(string):
 
@@ -23,8 +23,8 @@ def url_finder(string):
 
 def send_nudes(tweet):
 
-	fromaddr = "coin.tergrillo@gmail.com"
-	recipients = ['vtergolina@hotmail.com' , 'bruno.grillo@ufrgs.br']
+	fromaddr = ""                   #EMAILS!!!!
+	recipients = ['' , '']
 	msg = MIMEMultipart()
 	msg['From'] = fromaddr
 	msg['To'] = ", ".join(recipients)
@@ -38,7 +38,7 @@ def send_nudes(tweet):
 	server.ehlo()
 	server.starttls()
 	server.ehlo()
-	server.login("coin.tergrillo", "bikedosbrothers")
+	server.login("", "") #COLOCAR LOGIN E SENHAAAA!!!!
 	text = msg.as_string()
 	server.sendmail(fromaddr, recipients, text)
 	return;
@@ -91,5 +91,5 @@ def get_tweets(screen_name):
 
 if __name__ == '__main__':
 	#pass in the username of the account you want to download
-	get_tweets("vtergolina2")
+	get_tweets("officialmcafee")
 
