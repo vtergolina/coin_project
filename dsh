@@ -1,0 +1,125 @@
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(ggfortify)
+library(plotly)
+library(forecast)
+rm(list = ls())
+setwd()
+# BASE ----
+arquivos <- c("C734.csv", "C736.csv")
+baseR <- vector("list", length(arquivos))
+for (w in seq_along(arquivos)) {
+  baseR[[w]] <- read.table(arquivos[w], header = TRUE, sep = ";", stringsAsFactors = FALSE)
+}
+baseR <- do.call(rbind, baseR)
+  # BASE: AJUSTE ----
+baseR <- baseR %>%
+  replace(is.na(.), 0) %>%
+  filter(MARKETING_CELL_NM != "SMS_CCR(3)") %>%
+  mutate(
+    FAIXA_ETARIA = ifelse(IDADE <= 25, "00-25", 
+                      ifelse(IDADE <= 33, "26-33", 
+                        ifelse(IDADE <= 42, "34-42", 
+                          ifelse(IDADE <= 53, "43-53", "54-+"))))
+  )
+
+# FUNÇÃO RESULTADO CAMPANHA ----
+x <- baseR %>% filter(CAMPAIGN_SK == 734)
+funcaoRetornarResultado <- function(x, ctFxEMM = 250, ctVrEMM = 0.0009, ctVrSMS = 0.05,
+                                    mrgmProd = 0.3468, # PODE SER DO EP OU DO VAREJO
+                                    mrgmCartao = 0.0573 # MARGEM DA REALIZE POR TRANSACAO
+                                    ) {
+  # AJUSTES NA BASE
+  x <- x %>%
+    mutate(
+      CELULA_MARKETING = gsub("_Control", "", MARKETING_CELL_NM),
+      IS_CONTROL = grepl("_Control", MARKETING_CELL_NM),
+      CONTROLE = ifelse(grepl("_Control", MARKETING_CELL_NM), "Controle", "")
+    )
+  # TABELA RESULTADO ----
+  dfResultado <- x %>%
+    group_by(COMMUNICATION_NM, MARKETING_CELL_NM, CELULA_MARKETING, IS_CONTROL) %>%
+    summarise(
+      Comunicados = n_distinct(CD_CLNT),
+      Interacao = sum(INTERAGIU[INTERAGIU != 0]),
+      ClientesCompras = n_distinct(CD_CLNT[QTDE_COMPRAS > 0]),
+      QtdeContratos = sum(QTDE_COMPRAS),
+      ValorGasto = sum(VALOR_COMPRAS)
+    ) %>% 
+    mutate(
+      PercInteracao = ifelse(!IS_CONTROL, {Interacao / Comunicados}, {0}),
+      RetornoBruto = ifelse(!IS_CONTROL, {ClientesCompras / Interacao}, {ClientesCompras / Comunicados}),
+      CompraMedia = ValorGasto / ClientesCompras,
+      TicketMedio = ValorGasto / QtdeContratos,
+      FreqMedia = QtdeContratos / ClientesCompras
+    ) %>% as.data.frame # PRECISA QUEBRA PARA USAR MERGE
+  
+  dfResultado <- dfResultado %>%
+      merge(., {dfResultado %>% 
+          filter(IS_CONTROL == TRUE) %>% 
+          select(CELULA_MARKETING, RetornoBruto) %>%
+          rename(RetornoBrutoGC = RetornoBruto)
+      }, all.x = TRUE) %>%
+      mutate(
+        RetornoIncrementalPP = RetornoBruto - RetornoBrutoGC,
+        VendaIncremental = RetornoIncrementalPP * CompraMedia * Interacao,
+        CustoTotal = ifelse(grepl("EMM", COMMUNICATION_NM), 
+          {ctFxEMM + ctVrEMM * Comunicados}, 
+          {ctVrSMS * Comunicados}
+        )
+      ) %>%
+      mutate(
+        MargemProduto = VendaIncremental * mrgmProd,
+        MargemTransacao = VendaIncremental * mrgmCartao,
+        VendaRealInvestido = VendaIncremental / CustoTotal,
+        MargemTotal = MargemProduto + MargemTransacao,
+        ROI = MargemTotal / CustoTotal
+      ) %>%
+      select(
+        COMMUNICATION_NM, MARKETING_CELL_NM, Comunicados, Interacao, PercInteracao, ClientesCompras,
+        RetornoBruto, QtdeContratos, ValorGasto, CompraMedia, TicketMedio, FreqMedia,
+        RetornoIncrementalPP, VendaIncremental, CustoTotal, VendaRealInvestido, MargemTotal, 
+        MargemProduto, MargemTransacao, ROI
+      )
+  # GRÁFICOS ----
+    # GRÁFICOS: AJUSTAR BASE PARA PLOT ----
+  basePlotReagiu <- x %>%
+    filter(
+      VALOR_COMPRAS > 0
+    ) %>%
+    within(., {
+      SexoGrp <- as.factor(paste(SEXO, CONTROLE, sep = " "))
+      ClasseSocialGrp <- as.factor(paste(CLASSE_SOCIAL, CONTROLE, sep = " "))
+      FaixaEtariaGrp <- as.factor(paste(FAIXA_ETARIA, CONTROLE, sep = " "))
+    })
+    # GRÁFICOS: FUNÇÃO GERAR BOX-PLOT ----
+  funcaoBoxPlot <- function(base, eixoX, eixoY) {
+    # DEFINIR EIXOS E LIMITES
+    base <- base %>%
+      select_(
+        eixoX, eixoY
+      )
+    q1 <- quantile(base, probs = 0.25)
+    q3 <- quantile(base, probs = 0.75)
+    limiteSuperior <- q3 + 1.5 * (q3 - q1)
+    # PLOT
+    grafico <- ggplot(basePlotReagiu, 
+      aes_string(x = eixoX, y = eixoY, fill = eixoX)) + 
+      geom_boxplot() + guides(fill = FALSE) +
+      scale_y_continuous(limits = c(0, 500)) +
+      theme_bw()
+  return(grafico)
+  }
+  
+  # GRÁFICOS: APLICAR FUNCAO ----
+  possibilidadesX <- c("SexoGrp", "ClasseSocialGrp", "FaixaEtariaGrp")
+  possibilidadesY <- c("VALOR_COMPRAS", "QTDE_COMPRAS")
+  possibilidades <- expand.grid(possibilidadesX, possibilidadesY, stringsAsFactors = FALSE)
+  basePlot <- vector("list", nrow(possibilidades))
+  for (w in nrow(possibilidades)) {
+    basePlot[[w]] <- funcaoBoxPlot(base = basePlotReagiu, 
+      eixoX = possibilidades$Var1[w], eixoY = possibilidades$Var2[w]
+    )
+  }
+}
